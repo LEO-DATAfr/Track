@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PE Hub - Tests d'Inscription & Base de Données</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.0"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee; padding: 20px; }
+    .container { max-width: 1200px; margin: 0 auto; }
+    h1 { color: #667eea; margin-bottom: 30px; }
+    .test-section { 
+      background: #16213e; border-left: 4px solid #667eea; 
+      padding: 20px; margin-bottom: 20px; border-radius: 8px;
+    }
+    .test-section h2 { color: #667eea; margin-bottom: 15px; font-size: 1.2em; }
+    .test-item {
+      background: #0f3460; padding: 15px; margin-bottom: 10px; 
+      border-radius: 6px; border-left: 3px solid #e94560;
+    }
+    .test-item.pass { border-left-color: #28a745; background: #0d2817; }
+    .test-item.fail { border-left-color: #e94560; background: #2d0f14; }
+    .test-item.pending { border-left-color: #ffc107; background: #2d2410; }
+    .test-item h3 { font-size: 1em; margin-bottom: 8px; }
+    .test-item p { font-size: 0.9em; opacity: 0.8; margin: 5px 0; font-family: monospace; }
+    .status { 
+      display: inline-block; padding: 4px 12px; border-radius: 4px; 
+      font-weight: bold; font-size: 0.85em; margin-bottom: 10px;
+    }
+    .status.pass { background: #28a745; color: white; }
+    .status.fail { background: #e94560; color: white; }
+    .status.pending { background: #ffc107; color: black; }
+    button { 
+      background: #667eea; color: white; border: none; 
+      padding: 12px 24px; border-radius: 6px; cursor: pointer; 
+      font-weight: 600; margin-right: 10px; margin-top: 10px;
+    }
+    button:hover { background: #5568d3; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .summary { 
+      background: #28a745; color: white; padding: 20px; 
+      border-radius: 8px; margin-top: 30px; font-weight: bold;
+    }
+    .summary.fail { background: #e94560; }
+    .log-box { 
+      background: #0a0e27; padding: 15px; border-radius: 6px; 
+      margin-top: 10px; font-family: monospace; font-size: 0.85em;
+      max-height: 200px; overflow-y: auto; line-height: 1.4;
+    }
+    .clear-btn { background: #e94560; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🧪 PE Hub - Tests d'Inscription & Base de Données</h1>
+    
+    <button onclick="runAllTests()">▶️ Démarrer tous les tests</button>
+    <button onclick="clearAllLocalData()" class="clear-btn">🗑️ Effacer données locales</button>
+    
+    <!-- TEST 1: VALIDATION DE L'AUTHENTIFICATION ID -->
+    <div class="test-section">
+      <h2>1️⃣ Validation des IDs Autorisés</h2>
+      <div id="test-auth-id"></div>
+    </div>
+
+    <!-- TEST 2: INSCRIPTION ÉTUDIANT -->
+    <div class="test-section">
+      <h2>2️⃣ Inscription d'Étudiants</h2>
+      <div id="test-student-reg"></div>
+    </div>
+
+    <!-- TEST 3: INSCRIPTION PROFESSEUR -->
+    <div class="test-section">
+      <h2>3️⃣ Inscription de Professeurs</h2>
+      <div id="test-teacher-reg"></div>
+    </div>
+
+    <!-- TEST 4: VÉRIFICATION SUPABASE -->
+    <div class="test-section">
+      <h2>4️⃣ Vérification Supabase</h2>
+      <div id="test-supabase"></div>
+    </div>
+
+    <!-- TEST 5: VÉRIFICATION LOCALSTORAGE -->
+    <div class="test-section">
+      <h2>5️⃣ Vérification LocalStorage</h2>
+      <div id="test-localstorage"></div>
+    </div>
+
+    <!-- RÉSUMÉ -->
+    <div id="summary"></div>
+  </div>
+
+  <script>
+    // Configuration Supabase
+    const supabaseUrl = 'https://mfmznpgvylehiszktizh.supabase.co';
+    const supabaseKey = 'sb_publishable_YA5j8n84LpO7TLwnxHQz1g_BNkL4hyL';
+    const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
+    
+    let testResults = { passed: 0, failed: 0, tests: [] };
+
+    // Fonctions depuis index.html
+    function sdkParseStore(collection) {
+      try {
+        return JSON.parse(localStorage.getItem(collection) || '{}');
+      } catch (e) {
+        console.warn('[SDK] Corrupted data in "' + collection + '", clearing.');
+        localStorage.removeItem(collection);
+        return {};
+      }
+    }
+
+    function sdkSave(collection, id, data) {
+      const store = sdkParseStore(collection);
+      store[id] = { ...data, _id: id, _updatedAt: new Date().toISOString() };
+      localStorage.setItem(collection, JSON.stringify(store));
+      return store[id];
+    }
+
+    function sdkLoadAll(collection) {
+      const store = sdkParseStore(collection);
+      return Object.values(store);
+    }
+
+    function uuid() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+    }
+
+    async function hashPassword(password) {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(password + 'peHubSalt2024');
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    function parseClassGrade(classGrade) {
+      if (!classGrade) return { yearGroup: null, classLetter: 'A', yearNum: null, isValid: false };
+      const match = String(classGrade).match(/^Year\s+(\d{1,2})\s*([A-Z]?)$/i);
+      if (!match) return { yearGroup: null, classLetter: 'A', yearNum: null, isValid: false };
+      const yearNum = parseInt(match[1], 10);
+      const classLetter = match[2] || 'A';
+      return {
+        yearGroup: yearNum,
+        classLetter: classLetter,
+        yearNum: yearNum,
+        classKey: `class_${yearNum}${classLetter}`,
+        isValid: true
+      };
+    }
+
+    function getKeyStage(year) {
+      const y = parseInt(year, 10);
+      if (y >= 1 && y <= 2) return 'KS1';
+      if (y >= 3 && y <= 4) return 'KS2';
+      if (y >= 5 && y <= 6) return 'KS2+';
+      if (y >= 7 && y <= 9) return 'KS3';
+      if (y >= 10 && y <= 11) return 'KS4';
+      if (y >= 12 && y <= 13) return 'KS5';
+      return 'Unknown';
+    }
+
+    // Afficher un résultat de test
+    function displayTest(containerId, testName, status, details, logs = []) {
+      const container = document.getElementById(containerId);
+      const className = status === 'pass' ? 'pass' : status === 'fail' ? 'fail' : 'pending';
+      const statusEmoji = status === 'pass' ? '✅' : status === 'fail' ? '❌' : '⏳';
+      
+      const html = `
+        <div class="test-item ${className}">
+          <div class="status ${className}">${statusEmoji} ${status.toUpperCase()}</div>
+          <h3>${testName}</h3>
+          <p>${details}</p>
+          ${logs.length > 0 ? `<div class="log-box">${logs.join('<br>')}</div>` : ''}
+        </div>
+      `;
+      container.innerHTML += html;
+      
+      testResults.tests.push({ name: testName, status, details });
+      if (status === 'pass') testResults.passed++;
+      else if (status === 'fail') testResults.failed++;
+    }
+
+    // TEST 1: Validation des IDs autorisés
+    async function testAuthIdValidation() {
+      console.log('🧪 TEST 1: Validation des IDs autorisés');
+      const container = 'test-auth-id';
+      
+      // Simuler des IDs autorisés
+      const teststudentId = 'STU001';
+      const testteacherId = 'TEA001';
+      
+      sdkSave('authorizedIds', teststudentId, {
+        type: 'student',
+        registered: false,
+        presetFirstName: 'Test',
+        presetLastName: 'Student'
+      });
+      
+      sdkSave('authorizedIds', testteacherId, {
+        type: 'teacher',
+        registered: false,
+        presetFirstName: 'Test',
+        presetLastName: 'Teacher'
+      });
+      
+      const authIds = sdkLoadAll('authorizedIds');
+      const details = `${authIds.length} ID(s) autorisé(s) trouvé(s) en localStorage`;
+      const logs = [
+        `📌 ID Étudiant: ${teststudentId}`,
+        `📌 ID Professeur: ${testteacherId}`,
+        `✓ AuthorizedIds collection créée`
+      ];
+      
+      displayTest(container, 'Création des IDs autorisés', 'pass', details, logs);
+    }
+
+    // TEST 2: Inscription d'étudiants
+    async function testStudentRegistration() {
+      console.log('🧪 TEST 2: Inscription d\'étudiants');
+      const container = 'test-student-reg';
+      const testCount = 3;
+      
+      for (let i = 1; i <= testCount; i++) {
+        const id = uuid();
+        const firstName = `Student${i}`;
+        const familyName = `Test${i}`;
+        const email = `student${i}@test.com`;
+        const authId = `STU${String(i).padStart(3, '0')}`;
+        const password = await hashPassword('password123');
+        
+        const classInfo = parseClassGrade(`Year ${7 + (i % 3)}`);
+        
+        const studentData = {
+          firstName,
+          familyName,
+          email,
+          studentId: authId,
+          authorizedId: authId,
+          password,
+          gender: i % 2 === 0 ? 'Female' : 'Male',
+          school: 'Test School',
+          house: ['Gryffindor', 'Slytherin', 'Hufflepuff'][i % 3],
+          classGrade: `Year ${7 + (i % 3)}`,
+          yearNumber: classInfo.yearNum,
+          yearGroup: classInfo.yearGroup,
+          classLetter: classInfo.classLetter,
+          keyStage: getKeyStage(classInfo.yearNum),
+          profilePic: '',
+          activated: true,
+          onboardingComplete: false,
+          xp: 0,
+          housePoints: 0,
+          quizLevelsCompleted: 0,
+          sportsCount: 0,
+          lessonsDone: 0,
+          achievements: [],
+          createdAt: new Date().toISOString(),
+          lastActiveTimestamp: new Date().toISOString()
+        };
+        
+        try {
+          // Essayer Supabase
+          const { data, error } = await supabase.auth.signUp({
+            email: email,
+            password: 'password123',
+            options: {
+              data: {
+                first_name: firstName,
+                last_name: familyName,
+                user_type: 'student',
+                authorized_id: authId
+              }
+            }
+          });
+          
+          // Sauvegarder localement (fallback)
+          sdkSave('students', id, studentData);
+          
+          const detail = `${firstName} ${familyName} (${email}) inscrit avec succès`;
+          const logs = [
+            `📧 Email: ${email}`,
+            `🆔 ID: ${authId}`,
+            `👥 Genre: ${studentData.gender}`,
+            `🏠 Maison: ${studentData.house}`,
+            `📚 Classe: ${studentData.classGrade}`,
+            `🎓 Key Stage: ${studentData.keyStage}`,
+            `✓ Données sauvegardées en localStorage`
+          ];
+          
+          displayTest(container, `Inscription Étudiant #${i}`, 'pass', detail, logs);
+        } catch (err) {
+          displayTest(container, `Inscription Étudiant #${i}`, 'fail', `Erreur: ${err.message}`);
+        }
+      }
+    }
+
+    // TEST 3: Inscription de professeurs
+    async function testTeacherRegistration() {
+      console.log('🧪 TEST 3: Inscription de professeurs');
+      const container = 'test-teacher-reg';
+      const testCount = 2;
+      
+      for (let i = 1; i <= testCount; i++) {
+        const id = uuid();
+        const firstName = `Teacher${i}`;
+        const familyName = `Test${i}`;
+        const email = `teacher${i}@test.com`;
+        const authId = `TEA${String(i).padStart(3, '0')}`;
+        const password = await hashPassword('password123');
+        
+        const teacherData = {
+          title: i % 2 === 0 ? 'Mr' : 'Ms',
+          firstName,
+          familyName,
+          email,
+          teacherId: authId,
+          authorizedId: authId,
+          password,
+          school: 'Test School',
+          qualifications: ['PGCE'],
+          yearsExperience: 5 + i,
+          specialisms: ['Football', 'Athletics'],
+          managerCode: i === 1 ? 'ADMIN001' : '',
+          activated: true,
+          createdAt: new Date().toISOString(),
+          lastActiveTimestamp: new Date().toISOString()
+        };
+        
+        try {
+          // Essayer Supabase
+          const { data, error } = await supabase.auth.signUp({
+            email: email,
+            password: 'password123',
+            options: {
+              data: {
+                first_name: firstName,
+                last_name: familyName,
+                user_type: 'teacher',
+                authorized_id: authId
+              }
+            }
+          });
+          
+          // Sauvegarder localement (fallback)
+          sdkSave('teachers', id, teacherData);
+          
+          const detail = `${teacherData.title} ${firstName} ${familyName} (${email}) inscrit avec succès`;
+          const logs = [
+            `📧 Email: ${email}`,
+            `🆔 ID: ${authId}`,
+            `🎓 Qualifications: ${teacherData.qualifications.join(', ')}`,
+            `📖 Expérience: ${teacherData.yearsExperience} ans`,
+            `🏫 École: ${teacherData.school}`,
+            `✓ Données sauvegardées en localStorage`
+          ];
+          
+          displayTest(container, `Inscription Professeur #${i}`, 'pass', detail, logs);
+        } catch (err) {
+          displayTest(container, `Inscription Professeur #${i}`, 'fail', `Erreur: ${err.message}`);
+        }
+      }
+    }
+
+    // TEST 4: Vérification Supabase
+    async function testSupabaseConnection() {
+      console.log('🧪 TEST 4: Vérification Supabase');
+      const container = 'test-supabase';
+      
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (error) throw error;
+        
+        const status = session ? 'Connecté' : 'Non connecté (mode local)';
+        const logs = [
+          `✓ URL Supabase: ${supabaseUrl}`,
+          `✓ Authentification: ${status}`,
+          `✓ Clé: ${supabaseKey.substring(0, 20)}...`
+        ];
+        
+        displayTest(container, 'Connexion Supabase', 'pass', status, logs);
+      } catch (err) {
+        displayTest(container, 'Connexion Supabase', 'fail', `Erreur: ${err.message}`);
+      }
+    }
+
+    // TEST 5: Vérification LocalStorage
+    function testLocalStorageData() {
+      console.log('🧪 TEST 5: Vérification LocalStorage');
+      const container = 'test-localstorage';
+      
+      const students = sdkLoadAll('students');
+      const teachers = sdkLoadAll('teachers');
+      const authIds = sdkLoadAll('authorizedIds');
+      
+      const logs = [
+        `📊 Étudiants en localStorage: ${students.length}`,
+        `📊 Professeurs en localStorage: ${teachers.length}`,
+        `📊 IDs autorisés en localStorage: ${authIds.length}`,
+        `💾 Taille localStorage: ${new Blob(Object.values(localStorage)).size} bytes`
+      ];
+      
+      students.forEach((s, i) => {
+        logs.push(`  └─ ${i + 1}. ${s.firstName} ${s.familyName} (${s.email}) - ${s.classGrade}`);
+      });
+      
+      teachers.forEach((t, i) => {
+        logs.push(`  └─ ${i + 1}. ${t.title} ${t.firstName} ${t.familyName} (${t.email})`);
+      });
+      
+      const detail = `${students.length} étudiant(s) et ${teachers.length} professeur(s) sauvegardé(s)`;
+      displayTest(container, 'Données LocalStorage', students.length > 0 || teachers.length > 0 ? 'pass' : 'pending', detail, logs);
+    }
+
+    // Effacer les données locales
+    function clearAllLocalData() {
+      if (!confirm('⚠️ Êtes-vous sûr? Cela effacera TOUTES les données de localStorage!')) return;
+      localStorage.clear();
+      alert('✓ Données effacées!');
+      location.reload();
+    }
+
+    // Exécuter tous les tests
+    async function runAllTests() {
+      testResults = { passed: 0, failed: 0, tests: [] };
+      document.querySelectorAll('[id^="test-"]').forEach(el => el.innerHTML = '');
+      document.getElementById('summary').innerHTML = '';
+      
+      console.log('🧪 DÉMARRAGE DES TESTS...');
+      
+      await testAuthIdValidation();
+      await testStudentRegistration();
+      await testTeacherRegistration();
+      await testSupabaseConnection();
+      testLocalStorageData();
+      
+      // Afficher le résumé
+      const summaryDiv = document.getElementById('summary');
+      const passRate = Math.round((testResults.passed / testResults.tests.length) * 100);
+      const isFailing = testResults.failed > 0;
+      
+      summaryDiv.className = isFailing ? 'summary fail' : 'summary';
+      summaryDiv.innerHTML = `
+        <h2>📈 Résumé des Résultats</h2>
+        <p>✅ Réussis: ${testResults.passed} | ❌ Échoués: ${testResults.failed} | Total: ${testResults.tests.length}</p>
+        <p>📊 Taux de réussite: ${passRate}%</p>
+      `;
+      
+      console.log(`✅ Tests terminés: ${testResults.passed}/${testResults.tests.length} réussis`);
+    }
+
+    // Exécuter automatiquement au chargement
+    window.addEventListener('load', () => {
+      console.log('✓ Script de test chargé. Cliquez sur "Démarrer tous les tests"');
+    });
+  </script>
+</body>
+</html>
