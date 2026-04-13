@@ -153,8 +153,13 @@ class UniversalSupabaseSync {
       this.removeFromQueue(operation);
       
     } catch (err) {
-      console.error(`[UniversalSync] ❌ Sync error:`, err);
-      // Keep in queue for retry
+      if (err?.code === 'PGRST205' && err.message?.includes('Could not find the table')) {
+        console.error(`[UniversalSync] ❌ Fatal schema error: ${err.message}`);
+        console.error('[UniversalSync] 🔧 Supabase table missing for this collection. Create the missing tables in Supabase using supabase-schema.sql, then refresh the app.');
+      } else {
+        console.error(`[UniversalSync] ❌ Sync error:`, err);
+      }
+      // Keep in queue for retry once the schema is fixed
     }
   }
 
@@ -165,63 +170,142 @@ class UniversalSupabaseSync {
   async syncStudentData(studentId, studentData) {
     console.log(`[UniversalSync] 👤 Syncing student: ${studentId}`);
     
-    const { data, error } = await this.supabase
-      .from('students')
-      .upsert([{
-        id: studentId,
-        first_name: studentData.firstName,
-        last_name: studentData.familyName,
-        email: studentData.email,
-        gender: studentData.gender,
-        class_grade: studentData.classGrade,
-        house: studentData.house,
-        school: studentData.school,
-        xp: studentData.xp || 0,
-        house_points: studentData.housePoints || 0,
-        profile_pic: studentData.profilePic || '',
-        updated_at: new Date().toISOString()
-      }], { onConflict: 'id' });
+    // CORE COLUMNS ONLY - These definitely exist in the original schema
+    const payload = {
+      id: studentId,
+      first_name: studentData.firstName,
+      last_name: studentData.familyName,
+      email: studentData.email,
+      gender: studentData.gender || null,
+      class_grade: studentData.classGrade || null,
+      house: studentData.house || null,
+      school: studentData.school || null,
+      xp: studentData.xp || 0,
+      house_points: studentData.housePoints || 0,
+      activated: studentData.activated || false,
+      onboarding_complete: studentData.onboardingComplete || false,
+      updated_at: new Date().toISOString()
+    };
+    
+    console.log(`[UniversalSync] 📤 Student payload (core columns):`, payload);
+    
+    try {
+      // Upsert core columns
+      const { data, error } = await this.supabase
+        .from('students')
+        .upsert([payload]);
 
-    if (error) throw error;
-    console.log(`[UniversalSync] ✅ Student synced`);
-    return data;
+      if (error) {
+        console.warn(`[UniversalSync] ⚠️  Upsert failed, retrying with update...`);
+        
+        // Fallback: update
+        const { data: updateData, error: updateError } = await this.supabase
+          .from('students')
+          .update(payload)
+          .eq('id', studentId);
+        
+        if (updateError) {
+          console.warn(`[UniversalSync] ⚠️  Update failed, trying insert...`);
+          const { data: insertData, error: insertError } = await this.supabase
+            .from('students')
+            .insert([payload]);
+          
+          if (insertError) {
+            console.error(`[UniversalSync] ❌ Sync failed (all 3 methods):`, insertError);
+            throw insertError;
+          }
+          console.log(`[UniversalSync] ✅ Student synced (INSERT)`);
+          return insertData;
+        }
+        console.log(`[UniversalSync] ✅ Student synced (UPDATE)`);
+        return updateData;
+      }
+      
+      console.log(`[UniversalSync] ✅ Student synced (UPSERT):`, data);
+      return data;
+    } catch (err) {
+      console.error(`[UniversalSync] ❌ Student sync error:`, err);
+      throw err;
+    }
   }
 
   async syncQuizProgress(quizId, quizData) {
     console.log(`[UniversalSync] 📚 Syncing quiz progress: ${quizId}`);
     
-    const { data, error } = await this.supabase
-      .from('quiz_progress')
-      .upsert([{
-        id: quizId,
-        student_id: quizData.studentId,
-        quiz_key: quizData.quizKey,
-        score: quizData.score,
-        completed_at: quizData.completedAt,
-        updated_at: new Date().toISOString()
-      }], { onConflict: 'id' });
+    const payload = {
+      id: quizId,
+      student_id: quizData.studentId,
+      quiz_key: quizData.quizKey,
+      score: quizData.score,
+      completed_at: quizData.completedAt,
+      updated_at: new Date().toISOString()
+    };
+    
+    try {
+      const { data, error } = await this.supabase
+        .from('quiz_progress')
+        .upsert([payload]);
 
-    if (error) throw error;
-    console.log(`[UniversalSync] ✅ Quiz progress synced`);
-    return data;
+      if (error) {
+        const { data: updateData, error: updateError } = await this.supabase
+          .from('quiz_progress')
+          .update(payload)
+          .eq('id', quizId);
+        
+        if (updateError) {
+          const { data: insertData, error: insertError } = await this.supabase
+            .from('quiz_progress')
+            .insert([payload]);
+          if (insertError) throw insertError;
+          return insertData;
+        }
+        return updateData;
+      }
+      console.log(`[UniversalSync] ✅ Quiz progress synced`);
+      return data;
+    } catch (err) {
+      console.error(`[UniversalSync] ❌ Quiz sync error:`, err);
+      throw err;
+    }
   }
 
   async syncStudentAchievements(achievementId, achievementData) {
     console.log(`[UniversalSync] 🏆 Syncing achievement: ${achievementId}`);
     
-    const { data, error } = await this.supabase
-      .from('student_achievements')
-      .upsert([{
-        id: achievementId,
-        student_id: achievementData.studentId,
-        achievement_key: achievementData.key,
-        earned_at: achievementData.earnedAt,
-        updated_at: new Date().toISOString()
-      }], { onConflict: 'id' });
+    const payload = {
+      id: achievementId,
+      student_id: achievementData.studentId,
+      achievement_key: achievementData.key,
+      earned_at: achievementData.earnedAt,
+      updated_at: new Date().toISOString()
+    };
+    
+    try {
+      const { data, error } = await this.supabase
+        .from('student_achievements')
+        .upsert([payload]);
 
-    if (error) throw error;
-    console.log(`[UniversalSync] ✅ Achievement synced`);
-    return data;
+      if (error) {
+        const { data: updateData, error: updateError } = await this.supabase
+          .from('student_achievements')
+          .update(payload)
+          .eq('id', achievementId);
+        
+        if (updateError) {
+          const { data: insertData, error: insertError } = await this.supabase
+            .from('student_achievements')
+            .insert([payload]);
+          if (insertError) throw insertError;
+          return insertData;
+        }
+        return updateData;
+      }
+      console.log(`[UniversalSync] ✅ Achievement synced`);
+      return data;
+    } catch (err) {
+      console.error(`[UniversalSync] ❌ Achievement sync error:`, err);
+      throw err;
+    }
   }
 
   /* ====================================
@@ -231,46 +315,88 @@ class UniversalSupabaseSync {
   async syncTeacherData(teacherId, teacherData) {
     console.log(`[UniversalSync] 👨‍🏫 Syncing teacher: ${teacherId}`);
     
-    const { data, error } = await this.supabase
-      .from('teachers')
-      .upsert([{
-        id: teacherId,
-        first_name: teacherData.firstName,
-        last_name: teacherData.familyName,
-        email: teacherData.email,
-        title: teacherData.title,
-        school: teacherData.school,
-        qualifications: JSON.stringify(teacherData.qualifications || []),
-        years_experience: teacherData.yearsExperience,
-        specialisms: JSON.stringify(teacherData.specialisms || []),
-        updated_at: new Date().toISOString()
-      }], { onConflict: 'id' });
+    const payload = {
+      id: teacherId,
+      first_name: teacherData.firstName,
+      last_name: teacherData.familyName,
+      email: teacherData.email,
+      title: teacherData.title,
+      school: teacherData.school,
+      qualifications: JSON.stringify(teacherData.qualifications || []),
+      years_experience: teacherData.yearsExperience,
+      specialisms: JSON.stringify(teacherData.specialisms || []),
+      updated_at: new Date().toISOString()
+    };
+    
+    try {
+      const { data, error } = await this.supabase
+        .from('teachers')
+        .upsert([payload]);
 
-    if (error) throw error;
-    console.log(`[UniversalSync] ✅ Teacher synced`);
-    return data;
+      if (error) {
+        const { data: updateData, error: updateError } = await this.supabase
+          .from('teachers')
+          .update(payload)
+          .eq('id', teacherId);
+        
+        if (updateError) {
+          const { data: insertData, error: insertError } = await this.supabase
+            .from('teachers')
+            .insert([payload]);
+          if (insertError) throw insertError;
+          return insertData;
+        }
+        return updateData;
+      }
+      console.log(`[UniversalSync] ✅ Teacher synced`);
+      return data;
+    } catch (err) {
+      console.error(`[UniversalSync] ❌ Teacher sync error:`, err);
+      throw err;
+    }
   }
 
   async syncAssessment(assessmentId, assessmentData) {
     console.log(`[UniversalSync] 📊 Syncing assessment: ${assessmentId}`);
     
-    const { data, error } = await this.supabase
-      .from('assessments')
-      .upsert([{
-        id: assessmentId,
-        student_id: assessmentData.studentId,
-        sport_key: assessmentData.sportKey,
-        source: assessmentData.source,
-        skills: JSON.stringify(assessmentData.skills || []),
-        teacher_comment: assessmentData.teacherComment,
-        total_points: assessmentData.totalPoints,
-        created_at: assessmentData.createdAt,
-        updated_at: new Date().toISOString()
-      }], { onConflict: 'id' });
+    const payload = {
+      id: assessmentId,
+      student_id: assessmentData.studentId,
+      sport_key: assessmentData.sportKey,
+      source: assessmentData.source,
+      skills: JSON.stringify(assessmentData.skills || []),
+      teacher_comment: assessmentData.teacherComment,
+      total_points: assessmentData.totalPoints,
+      created_at: assessmentData.createdAt,
+      updated_at: new Date().toISOString()
+    };
+    
+    try {
+      const { data, error } = await this.supabase
+        .from('assessments')
+        .upsert([payload]);
 
-    if (error) throw error;
-    console.log(`[UniversalSync] ✅ Assessment synced`);
-    return data;
+      if (error) {
+        const { data: updateData, error: updateError } = await this.supabase
+          .from('assessments')
+          .update(payload)
+          .eq('id', assessmentId);
+        
+        if (updateError) {
+          const { data: insertData, error: insertError } = await this.supabase
+            .from('assessments')
+            .insert([payload]);
+          if (insertError) throw insertError;
+          return insertData;
+        }
+        return updateData;
+      }
+      console.log(`[UniversalSync] ✅ Assessment synced`);
+      return data;
+    } catch (err) {
+      console.error(`[UniversalSync] ❌ Assessment sync error:`, err);
+      throw err;
+    }
   }
 
   async syncHousePointEvent(eventId, eventData) {
@@ -295,21 +421,42 @@ class UniversalSupabaseSync {
   async syncTeacherNotification(notificationId, notificationData) {
     console.log(`[UniversalSync] 🔔 Syncing notification: ${notificationId}`);
     
-    const { data, error } = await this.supabase
-      .from('teacher_notifications')
-      .upsert([{
-        id: notificationId,
-        teacher_id: notificationData.teacherId,
-        student_id: notificationData.studentId,
-        message: notificationData.message,
-        read: notificationData.read,
-        created_at: notificationData.createdAt,
-        updated_at: new Date().toISOString()
-      }], { onConflict: 'id' });
+    const payload = {
+      id: notificationId,
+      teacher_id: notificationData.teacherId,
+      student_id: notificationData.studentId,
+      message: notificationData.message,
+      read: notificationData.read,
+      created_at: notificationData.createdAt,
+      updated_at: new Date().toISOString()
+    };
+    
+    try {
+      const { data, error } = await this.supabase
+        .from('teacher_notifications')
+        .upsert([payload]);
 
-    if (error) throw error;
-    console.log(`[UniversalSync] ✅ Notification synced`);
-    return data;
+      if (error) {
+        const { data: updateData, error: updateError } = await this.supabase
+          .from('teacher_notifications')
+          .update(payload)
+          .eq('id', notificationId);
+        
+        if (updateError) {
+          const { data: insertData, error: insertError } = await this.supabase
+            .from('teacher_notifications')
+            .insert([payload]);
+          if (insertError) throw insertError;
+          return insertData;
+        }
+        return updateData;
+      }
+      console.log(`[UniversalSync] ✅ Notification synced`);
+      return data;
+    } catch (err) {
+      console.error(`[UniversalSync] ❌ Notification sync error:`, err);
+      throw err;
+    }
   }
 
   /* ====================================
@@ -319,40 +466,82 @@ class UniversalSupabaseSync {
   async syncAuthorizedId(idValue, idData) {
     console.log(`[UniversalSync] 🔑 Syncing authorized ID: ${idValue}`);
     
-    const { data, error } = await this.supabase
-      .from('authorized_ids')
-      .upsert([{
-        id: idValue,
-        type: idData.type,
-        registered: idData.registered,
-        preset_first_name: idData.presetFirstName,
-        preset_last_name: idData.presetLastName,
-        linked_student_id: idData.linkedStudentId,
-        updated_at: new Date().toISOString()
-      }], { onConflict: 'id' });
+    const payload = {
+      id: idValue,
+      type: idData.type,
+      registered: idData.registered,
+      preset_first_name: idData.presetFirstName,
+      preset_last_name: idData.presetLastName,
+      linked_student_id: idData.linkedStudentId,
+      updated_at: new Date().toISOString()
+    };
+    
+    try {
+      const { data, error } = await this.supabase
+        .from('authorized_ids')
+        .upsert([payload]);
 
-    if (error) throw error;
-    console.log(`[UniversalSync] ✅ Authorized ID synced`);
-    return data;
+      if (error) {
+        const { data: updateData, error: updateError } = await this.supabase
+          .from('authorized_ids')
+          .update(payload)
+          .eq('id', idValue);
+        
+        if (updateError) {
+          const { data: insertData, error: insertError } = await this.supabase
+            .from('authorized_ids')
+            .insert([payload]);
+          if (insertError) throw insertError;
+          return insertData;
+        }
+        return updateData;
+      }
+      console.log(`[UniversalSync] ✅ Authorized ID synced`);
+      return data;
+    } catch (err) {
+      console.error(`[UniversalSync] ❌ Authorized ID sync error:`, err);
+      throw err;
+    }
   }
 
   async syncSeasonHistory(seasonId, seasonData) {
     console.log(`[UniversalSync] 📅 Syncing season: ${seasonId}`);
     
-    const { data, error } = await this.supabase
-      .from('season_history')
-      .upsert([{
-        id: seasonId,
-        season_name: seasonData.name,
-        winners: JSON.stringify(seasonData.winners || {}),
-        start_date: seasonData.startDate,
-        end_date: seasonData.endDate,
-        updated_at: new Date().toISOString()
-      }], { onConflict: 'id' });
+    const payload = {
+      id: seasonId,
+      season_name: seasonData.name,
+      winners: JSON.stringify(seasonData.winners || {}),
+      start_date: seasonData.startDate,
+      end_date: seasonData.endDate,
+      updated_at: new Date().toISOString()
+    };
+    
+    try {
+      const { data, error } = await this.supabase
+        .from('season_history')
+        .upsert([payload]);
 
-    if (error) throw error;
-    console.log(`[UniversalSync] ✅ Season synced`);
-    return data;
+      if (error) {
+        const { data: updateData, error: updateError } = await this.supabase
+          .from('season_history')
+          .update(payload)
+          .eq('id', seasonId);
+        
+        if (updateError) {
+          const { data: insertData, error: insertError } = await this.supabase
+            .from('season_history')
+            .insert([payload]);
+          if (insertError) throw insertError;
+          return insertData;
+        }
+        return updateData;
+      }
+      console.log(`[UniversalSync] ✅ Season synced`);
+      return data;
+    } catch (err) {
+      console.error(`[UniversalSync] ❌ Season sync error:`, err);
+      throw err;
+    }
   }
 
   /* ====================================

@@ -760,8 +760,9 @@
       color: var(--text);
       font-size: 0.85rem;
       font-family: inherit;
-      transition: border-color var(--transition), box-shadow var(--transition);
+      transition: border-color var(--transition), box-shadow var(--transition), background-color var(--transition);
       outline: none;
+      cursor: text;
     }
 
     .form-input:focus {
@@ -8147,27 +8148,29 @@
 
       /* Ring style based on level - with glow progression */
       const ring = document.getElementById('avatarRingBorder');
-      ring.className = 'ring';
-      ring.style.color = getHouseColor(student.house);
-      ring.style.borderColor = getHouseColor(student.house);
-
-      /* Glow intensifies with level milestones */
-      if (level >= 40) {
-        ring.classList.add('level-legendary');
-        ring.style.boxShadow = `0 0 20px ${getHouseColor(student.house)}`;
-      } else if (level >= 30) {
-        ring.classList.add('level-elite');
-        ring.style.boxShadow = `0 0 16px ${getHouseColor(student.house)}`;
-      } else if (level >= 20) {
-        ring.classList.add('level-strong');
-        ring.style.boxShadow = `0 0 12px ${getHouseColor(student.house)}`;
-      } else if (level >= 10) {
-        ring.classList.add('level-glow');
-        ring.style.boxShadow = `0 0 8px ${getHouseColor(student.house)}`;
-      } else {
-        ring.classList.add('level-basic');
-        ring.style.borderColor = '#999';
-        ring.style.color = '#999';
+      if (ring) {
+        ring.className = 'ring';
+        ring.style.color = getHouseColor(student.house);
+        ring.style.borderColor = getHouseColor(student.house);
+        
+        /* Glow intensifies with level milestones */
+        if (level >= 40) {
+          ring.classList.add('level-legendary');
+          ring.style.boxShadow = `0 0 20px ${getHouseColor(student.house)}`;
+        } else if (level >= 30) {
+          ring.classList.add('level-elite');
+          ring.style.boxShadow = `0 0 16px ${getHouseColor(student.house)}`;
+        } else if (level >= 20) {
+          ring.classList.add('level-strong');
+          ring.style.boxShadow = `0 0 12px ${getHouseColor(student.house)}`;
+        } else if (level >= 10) {
+          ring.classList.add('level-glow');
+          ring.style.boxShadow = `0 0 8px ${getHouseColor(student.house)}`;
+        } else {
+          ring.classList.add('level-basic');
+          ring.style.borderColor = '#999';
+          ring.style.color = '#999';
+        }
       }
 
       /* Achievement badges */
