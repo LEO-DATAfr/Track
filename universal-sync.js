@@ -144,6 +144,9 @@ class UniversalSupabaseSync {
         case 'seasonHistory':
           await this.syncSeasonHistory(id, data);
           break;
+        case 'skillDefinitions':
+          await this.syncSkillDefinition(id, data);
+          break;
           
         default:
           console.log(`[UniversalSync] ℹ️  No sync rule for collection: ${collection}`);
@@ -320,11 +323,7 @@ class UniversalSupabaseSync {
       first_name: teacherData.firstName,
       last_name: teacherData.familyName,
       email: teacherData.email,
-      title: teacherData.title,
       school: teacherData.school,
-      qualifications: JSON.stringify(teacherData.qualifications || []),
-      years_experience: teacherData.yearsExperience,
-      specialisms: JSON.stringify(teacherData.specialisms || []),
       updated_at: new Date().toISOString()
     };
     
@@ -541,6 +540,105 @@ class UniversalSupabaseSync {
     } catch (err) {
       console.error(`[UniversalSync] ❌ Season sync error:`, err);
       throw err;
+    }
+  }
+
+  normalizeSkillDefinition(defData) {
+    if (!defData) return defData;
+    if (Array.isArray(defData)) {
+      return { skills: defData };
+    }
+    if (Array.isArray(defData.skills) && defData.skills.length > 0) {
+      return defData;
+    }
+    const SKILL_SLOTS = ['motor1', 'motor2', 'motor3', 'methodological', 'social'];
+    const LEVELS = ['level1', 'level2', 'level3', 'level4'];
+    const skills = SKILL_SLOTS.map(slot => {
+      const skill = defData[slot] || {};
+      return {
+        slot,
+        type: slot === 'methodological' ? 'Methodological' : slot === 'social' ? 'Social' : 'Motor',
+        name: skill.name || '',
+        levelDescriptions: LEVELS.map(level => skill[level] || '')
+      };
+    }).filter(skill => skill.name && skill.name.trim() !== '');
+    return { ...defData, skills };
+  }
+
+  async syncSkillDefinition(defId, defData) {
+    console.log(`[UniversalSync] 📚 Syncing skill definition: ${defId}`);
+    const normalized = this.normalizeSkillDefinition(defData);
+    
+    const payload = {
+      id: defId,
+      key_stage: defData.keyStage,
+      sport_key: defData.sportKey,
+      skills: JSON.stringify(normalized.skills),
+      updated_at: new Date().toISOString()
+    };
+    
+    try {
+      const { data, error } = await this.supabase
+        .from('skill_definitions')
+        .upsert([payload]);
+
+      if (error) {
+        const { data: updateData, error: updateError } = await this.supabase
+          .from('skill_definitions')
+          .update(payload)
+          .eq('id', defId);
+        
+        if (updateError) {
+          const { data: insertData, error: insertError } = await this.supabase
+            .from('skill_definitions')
+            .insert([payload]);
+          if (insertError) throw insertError;
+          return insertData;
+        }
+        return updateData;
+      }
+      console.log(`[UniversalSync] ✅ Skill definition synced`);
+      return data;
+    } catch (err) {
+      console.error(`[UniversalSync] ❌ Skill definition sync error:`, err);
+      throw err;
+    }
+  }
+
+  async loadSkillDefinitions() {
+    if (!this.isOnline) return;
+    
+    try {
+      const { data, error } = await this.supabase
+        .from('skill_definitions')
+        .select('*');
+      
+      if (error) throw error;
+      
+      // Store in localStorage
+      const store = {};
+      data.forEach(def => {
+        let parsed = JSON.parse(def.skills || '[]');
+        let normalizedInput;
+        if (Array.isArray(parsed)) {
+          normalizedInput = { skills: parsed };
+        } else {
+          normalizedInput = parsed;
+        }
+        const normalized = this.normalizeSkillDefinition(normalizedInput);
+        store[def.id] = {
+          _id: def.id,
+          keyStage: def.key_stage,
+          sportKey: def.sport_key,
+          ...normalized,
+          _updatedAt: def.updated_at
+        };
+      });
+      localStorage.setItem('skillDefinitions', JSON.stringify(store));
+      
+      console.log(`[UniversalSync] 📚 Loaded ${data.length} skill definitions from DB`);
+    } catch (err) {
+      console.error(`[UniversalSync] ❌ Failed to load skill definitions:`, err);
     }
   }
 

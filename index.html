@@ -3627,6 +3627,9 @@
        ============================================= */
     const universalSync = new UniversalSupabaseSync(supabase);
     console.log('[UniversalSync] ✅ Initialized - All data modifications will auto-sync to Supabase');
+    
+    // Load shared data from DB
+    universalSync.loadSkillDefinitions();
 
     /* =============================================
        DATA FORMAT DOCUMENTATION
@@ -6694,6 +6697,28 @@
       showToast(`Year ${yearGroup} - Class ${classLetter} sports updated! (${activeSports.length} active) ✓ Changes are live for students`);
     }
 
+    function normalizeSkillDefinition(def) {
+      if (!def) return def;
+      if (Array.isArray(def)) {
+        return { skills: def };
+      }
+      if (Array.isArray(def.skills) && def.skills.length > 0) {
+        return def;
+      }
+      const SKILL_SLOTS = ['motor1', 'motor2', 'motor3', 'methodological', 'social'];
+      const LEVELS = ['level1', 'level2', 'level3', 'level4'];
+      const skills = SKILL_SLOTS.map(slot => {
+        const skill = def[slot] || {};
+        return {
+          slot,
+          type: slot === 'methodological' ? 'Methodological' : slot === 'social' ? 'Social' : 'Motor',
+          name: skill.name || '',
+          levelDescriptions: LEVELS.map(level => skill[level] || '')
+        };
+      }).filter(skill => skill.name && skill.name.trim() !== '');
+      return { ...def, skills };
+    }
+
     /* =============================================
        STEP 19 - SKILL DEFINITIONS
        ============================================= */
@@ -6831,7 +6856,8 @@
             showToast('Please fill in all 25 fields (5 skill names + 4 levels each).');
             return;
           }
-          sdkSave('skillDefinitions', defKey, data);
+          const normalized = normalizeSkillDefinition(data);
+          sdkSave('skillDefinitions', defKey, normalized);
           showToast('Skill definitions saved!');
         });
       }
@@ -9375,7 +9401,7 @@
       document.getElementById('lessonContentTitle').textContent = `Lesson ${lessonNum} — Self Assessment · ${sport.name}`;
 
       const defKey = `${student.keyStage}_${sportKey}`;
-      const skillDef = sdkLoad('skillDefinitions', defKey);
+      const skillDef = normalizeSkillDefinition(sdkLoad('skillDefinitions', defKey));
       const body = document.getElementById('lessonContentBody');
 
       if (!skillDef || !skillDef.skills || skillDef.skills.length === 0) {
@@ -9472,7 +9498,7 @@
       if (!student || !sport) return;
 
       const defKey = `${student.keyStage}_${sportKey}`;
-      const skillDef = sdkLoad('skillDefinitions', defKey);
+      const skillDef = normalizeSkillDefinition(sdkLoad('skillDefinitions', defKey));
       if (!skillDef) return;
 
       const levelNames = ['Beginner', 'Explorer', 'Performer', 'Champion'];

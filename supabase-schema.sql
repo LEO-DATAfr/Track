@@ -125,6 +125,15 @@ CREATE TABLE IF NOT EXISTS season_history (
   updated_at TIMESTAMP DEFAULT NOW()
 );
 
+-- TABLE 11: Skill Definitions
+CREATE TABLE IF NOT EXISTS skill_definitions (
+  id TEXT PRIMARY KEY,
+  key_stage TEXT NOT NULL,
+  sport_key TEXT NOT NULL,
+  skills JSONB,
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
 -- =========================================================
 -- INDEXES FOR PERFORMANCE
 -- =========================================================

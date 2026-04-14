@@ -124,7 +124,16 @@ CREATE TABLE IF NOT EXISTS authorized_ids (
   linked_teacher_id TEXT REFERENCES teachers(id) ON DELETE SET NULL,
   updated_at TIMESTAMP DEFAULT NOW()
 );
-
+-- =========================================================
+-- SKILL DEFINITIONS (Teacher-defined skills per sport/KS)
+-- =========================================================
+CREATE TABLE IF NOT EXISTS skill_definitions (
+  id TEXT PRIMARY KEY,
+  key_stage TEXT NOT NULL,
+  sport_key TEXT NOT NULL,
+  skills JSONB,
+  updated_at TIMESTAMP DEFAULT NOW()
+);
 -- =========================================================
 -- INDEXES
 -- =========================================================
